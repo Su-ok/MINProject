@@ -1,4 +1,5 @@
 // client.c
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,42 +35,53 @@ int main() {
 
     printf("Connected to Banking Management Server.\n");
 
+    // Read initial greeting/menu before the main loop
     while (1) {
         memset(buffer, 0, sizeof(buffer));
-        // Use read() to get the greeting and first menu
         ssize_t bytes = read(sock, buffer, sizeof(buffer));
         if (bytes <= 0) {
             printf("Server closed the connection.\n");
             close(sock);
             return 0;
         }
+        
+        // Use standard output to print the initial greeting
         printf("%s", buffer);
-        fflush(stdout); //fix 1
-        // Wait for the server to show the menu text before prompting for choice
+        fflush(stdout); // Initial flush is fine here
+        
         if (strstr(buffer, "Enter your choice")) {
             break;
         }
     }
 
     while (1) {
-        // Get user's menu choice
-        printf("> ");
-        fflush(stdout); //fix 2
-        if (scanf("%d", &choice) != 1) {
-            printf("Invalid input. Exiting.\n");
+        /* Read menu choice from stdin using fgets and strtol so non-numeric
+           input won't cause the client to exit unexpectedly. */
+        char line[64];
+        while (1) {
+            printf("> ");
+            fflush(stdout);
+            if (!fgets(line, sizeof(line), stdin)) {
+                printf("Input error. Exiting.\n");
+                goto cleanup;
+            }
+
+            char *endptr;
+            long val = strtol(line, &endptr, 10);
+            while (*endptr == ' ' || *endptr == '\t') endptr++;
+            if (endptr == line || (*endptr != '\n' && *endptr != '\0')) {
+                printf("Invalid input. Please enter a number.\n");
+                continue;
+            }
+            choice = (int)val;
             break;
         }
-
-        // Clear input buffer (remove stray newline or leftover bytes)
-        int ch;
-        while ((ch = getchar()) != '\n' && ch != EOF);
 
         char choice_str[16];
         snprintf(choice_str, sizeof(choice_str), "%d", choice);
 
         // Send the choice as a STRING, including the null terminator
         write(sock, choice_str, strlen(choice_str) + 1);
-
 
         if (choice == 5) {
             printf("Logging out...\n");
@@ -83,15 +95,20 @@ int main() {
             if (bytes <= 0)
                 break;
 
-            printf("%s", buffer);
-            fflush(stdout);
+                /* Write server output unbuffered so prompts are displayed
+                    even if stdout is line-buffered. */
+                write(STDOUT_FILENO, buffer, bytes);
 
             // If the server is prompting for input (colon or >)
             if (strstr(buffer, ":") || strstr(buffer, ">")) {
                 char input[256];
                 printf("> ");
-                fflush(stdout); // flush after client prompt
-                scanf("%s", input);
+                fflush(stdout); // Flush after client prompt
+                if (!fgets(input, sizeof(input), stdin)) {
+                    printf("Input error. Exiting.\n");
+                    goto cleanup;
+                }
+                input[strcspn(input, "\n")] = '\0';
                 write(sock, input, strlen(input) + 1);
                 continue;  // keep looping to read next message
             }
@@ -103,6 +120,7 @@ int main() {
         }
     }
 
+cleanup:
     close(sock);
     return 0;
 }
