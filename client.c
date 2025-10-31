@@ -44,6 +44,7 @@ int main() {
             return 0;
         }
         printf("%s", buffer);
+        fflush(stdout); //fix 1
         // Wait for the server to show the menu text before prompting for choice
         if (strstr(buffer, "Enter your choice")) {
             break;
@@ -53,6 +54,7 @@ int main() {
     while (1) {
         // Get user's menu choice
         printf("> ");
+        fflush(stdout); //fix 2
         if (scanf("%d", &choice) != 1) {
             printf("Invalid input. Exiting.\n");
             break;
@@ -82,11 +84,13 @@ int main() {
                 break;
 
             printf("%s", buffer);
+            fflush(stdout);
 
             // If the server is prompting for input (colon or >)
             if (strstr(buffer, ":") || strstr(buffer, ">")) {
                 char input[256];
                 printf("> ");
+                fflush(stdout); // flush after client prompt
                 scanf("%s", input);
                 write(sock, input, strlen(input) + 1);
                 continue;  // keep looping to read next message
