@@ -4,14 +4,21 @@
 #include"employee.h"
 #include"manager.h"
 #include"admin.h"
+#include"loan.h"
 
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
 #include<unistd.h>
+#include<math.h> 
 
 char whoami[MAX_NAME];
 char shared_usernames[MAX_USERS][MAX_NAME];
+
+static void send_text(int sock, const char *txt);
+static int recv_string(int sock, char *buf, size_t bufsize);
+
+
 
 // Main client handler (runs in thread)
 void *handle_client(void *socket_desc) {
@@ -79,6 +86,9 @@ static int recv_string(int sock, char *buf, size_t bufsize) {
 void handle_customer(int sock) {
     char sendbuf[512];
     char uname[MAX_NAME], pwd[MAX_PASS];
+    char amt_str[32]; // For reading string input amounts
+    char lam_str[32]; // For reading string input loan amount
+
 
     send_text(sock, "\n-- CUSTOMER LOGIN --\nUsername: ");
     if (recv_string(sock, uname, sizeof(uname)) < 0) return;
@@ -126,8 +136,10 @@ void handle_customer(int sock) {
         else if (choice == 2 || choice == 3) { // deposit or withdraw
             if (choice == 2) send_text(sock, "Enter amount to deposit: ");
             else send_text(sock, "Enter amount to withdraw: ");
-            float amt = 0.0f;
-            if (read(sock, &amt, sizeof(amt)) <= 0) break;
+            
+            if (recv_string(sock, amt_str, sizeof(amt_str)) < 0) break;
+            float amt = atof(amt_str);
+
             float delta = (choice == 2) ? amt : -amt;
             int r = modify_balance(whoami, delta);
             if (r == 0) send_text(sock, "OK: operation successful\n");
@@ -138,7 +150,11 @@ void handle_customer(int sock) {
             char to_user[MAX_NAME];
             if (recv_string(sock, to_user, sizeof(to_user)) < 0) break;
             send_text(sock, "Enter amount: ");
-            float amt = 0.0f; if (read(sock, &amt, sizeof(amt)) <= 0) break;
+
+            if (recv_string(sock, amt_str, sizeof(amt_str)) < 0) break;
+            float amt = atof(amt_str);
+            // ----------------------------------------------------
+            
             int r = execute_transfer(whoami, to_user, amt);
             if (r == 0) send_text(sock, "OK: transfer successful\n");
             else send_text(sock, "ERR: transfer failed\n");
@@ -146,7 +162,11 @@ void handle_customer(int sock) {
         else if (choice == 5) {
             // For brevity assume apply_loan exists in loan module
             send_text(sock, "Enter loan amount: ");
-            float lam = 0.0f; if (read(sock, &lam, sizeof(lam)) <= 0) break;
+            
+            if (recv_string(sock, lam_str, sizeof(lam_str)) < 0) break;
+            float lam = atof(lam_str);
+            // ----------------------------------------------------
+
             // other details can be prompted similarly; here we call loan API
             if (apply_for_loan(whoami, lam) == 0) send_text(sock, "OK: loan request submitted\n");
             else send_text(sock, "ERR: loan submission failed\n");
@@ -179,6 +199,10 @@ void handle_customer(int sock) {
 // ---------- EMPLOYEE handler ----------
 void handle_employee(int sock) {
     char uname[MAX_NAME], pwd[MAX_PASS];
+    char bal_str[32]; // For reading string initial balance
+    char lid_str[16]; // For reading string loan id
+    char dec[20];
+
     send_text(sock, "\n-- EMPLOYEE LOGIN --\nUsername: ");
     if (recv_string(sock, uname, sizeof(uname)) < 0) return;
     send_text(sock, "Password: ");
@@ -215,7 +239,13 @@ void handle_employee(int sock) {
             send_text(sock, "Enter account number: "); if (recv_string(sock, nc.account_no, sizeof(nc.account_no)) < 0) break;
             send_text(sock, "Enter name: "); if (recv_string(sock, nc.name, sizeof(nc.name)) < 0) break;
             send_text(sock, "Enter phone: "); if (recv_string(sock, nc.phone_no, sizeof(nc.phone_no)) < 0) break;
-            send_text(sock, "Enter initial balance (float): "); float bal=0; if (read(sock, &bal, sizeof(bal)) <= 0) break; nc.balance = bal;
+            send_text(sock, "Enter initial balance (float): "); 
+            
+            if (recv_string(sock, bal_str, sizeof(bal_str)) < 0) break;
+            float bal = atof(bal_str);
+            // ----------------------------------------------------
+
+            nc.balance = bal;
             nc.loan_status = 0; nc.loan_amount = 0.0f;
             if (add_new_customer(&nc) == 0) send_text(sock, "OK: customer added\n"); else send_text(sock, "ERR: add customer failed\n");
         }
@@ -226,8 +256,13 @@ void handle_employee(int sock) {
             if (update_customer_record(target, field, val) == 0) send_text(sock, "OK: update success\n"); else send_text(sock, "ERR: update failed\n");
         }
         else if (choice == 3) {
-            send_text(sock, "Enter loan id: "); int lid; if (read(sock, &lid, sizeof(lid)) <= 0) break;
-            send_text(sock, "Enter decision (approve/reject): "); char dec[20]; if (recv_string(sock, dec, sizeof(dec)) < 0) break;
+            send_text(sock, "Enter loan id: "); 
+            
+            if (recv_string(sock, lid_str, sizeof(lid_str)) < 0) break;
+            int lid = atoi(lid_str);
+            // ----------------------------------------------------
+            
+            send_text(sock, "Enter decision (approve/reject): "); if (recv_string(sock, dec, sizeof(dec)) < 0) break;
             if (decide_loan_status(lid, whoami, dec) == 0) send_text(sock, "OK: loan processed\n"); else send_text(sock, "ERR: process failed\n");
         }
         else if (choice == 4) {
@@ -254,6 +289,9 @@ void handle_employee(int sock) {
 // ---------- MANAGER handler ----------
 void handle_manager(int sock) {
     char uname[MAX_NAME], pwd[MAX_PASS];
+    char lid_str[16]; // For reading string loan id
+    char flag_str[16]; // For reading string flag value
+
     send_text(sock, "\n-- MANAGER LOGIN --\nUsername: ");
     if (recv_string(sock, uname, sizeof(uname)) < 0) return;
     send_text(sock, "Password: ");
@@ -286,7 +324,12 @@ void handle_manager(int sock) {
             list_unassigned_loans(sock);
         }
         else if (choice == 2) {
-            send_text(sock, "Enter loan id: "); int lid; if (read(sock, &lid, sizeof(lid)) <= 0) break;
+            send_text(sock, "Enter loan id: "); 
+
+            if (recv_string(sock, lid_str, sizeof(lid_str)) < 0) break;
+            int lid = atoi(lid_str);
+            // ----------------------------------------------------
+
             send_text(sock, "Enter employee username: "); char empu[MAX_NAME]; if (recv_string(sock, empu, sizeof(empu)) < 0) break;
             if (assign_loan_to_staff(lid, empu) == 0) send_text(sock, "OK: loan assigned\n"); else send_text(sock, "ERR: assign failed\n");
         }
@@ -295,7 +338,12 @@ void handle_manager(int sock) {
         }
         else if (choice == 4) {
             send_text(sock, "Enter customer username: "); char cu[MAX_NAME]; if (recv_string(sock, cu, sizeof(cu)) < 0) break;
-            send_text(sock, "Enter status (1 = active, 0 = inactive): "); int flag=0; if (read(sock, &flag, sizeof(flag)) <= 0) break;
+            send_text(sock, "Enter status (1 = active, 0 = inactive): "); 
+            
+            if (recv_string(sock, flag_str, sizeof(flag_str)) < 0) break;
+            int flag = atoi(flag_str);
+            // ----------------------------------------------------
+
             if (set_customer_active_status(cu, flag) == 0) send_text(sock, "OK: status updated\n"); else send_text(sock, "ERR: update failed\n");
         }
         else if (choice == 5) {
@@ -318,6 +366,8 @@ void handle_manager(int sock) {
 // ---------- ADMIN handler ----------
 void handle_admin(int sock) {
     char uname[MAX_NAME], pwd[MAX_PASS];
+    char sal_str[32]; // For reading string salary
+
     send_text(sock, "\n-- ADMIN LOGIN --\nUsername: ");
     if (recv_string(sock, uname, sizeof(uname)) < 0) return;
     send_text(sock, "Password: ");
@@ -352,7 +402,13 @@ void handle_admin(int sock) {
             send_text(sock, "Enter name: "); if (recv_string(sock, e.name, sizeof(e.name)) < 0) break;
             send_text(sock, "Enter role (Manager/Staff): "); if (recv_string(sock, e.role, sizeof(e.role)) < 0) break;
             send_text(sock, "Enter phone: "); if (recv_string(sock, e.phone, sizeof(e.phone)) < 0) break;
-            send_text(sock, "Enter salary (float): "); float sal=0; if (read(sock, &sal, sizeof(sal)) <= 0) break; e.salary = sal;
+            send_text(sock, "Enter salary (float): "); 
+            
+            if (recv_string(sock, sal_str, sizeof(sal_str)) < 0) break;
+            float sal = atof(sal_str);
+            // ----------------------------------------------------
+
+            e.salary = sal;
             if (create_employee_record(&e) == 0) send_text(sock, "OK: employee created\n"); else send_text(sock, "ERR: create failed\n");
         }
         else if (choice == 2) {
